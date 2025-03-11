@@ -17,17 +17,6 @@ export function createDocumentWithMarks(
 		return { ...originalContent };
 	}
 
-	// Debug log - number of annotations to apply
-	console.log(
-		`[Debug] Annotation details:`,
-		annotations.map((a) => ({
-			id: a.id,
-			labelType: a.labelType,
-			text:
-				a.text && a.text.length > 20 ? a.text.substring(0, 20) + "..." : a.text,
-		}))
-	);
-
 	annotations.forEach((annotation) => {
 		// Ensure every annotation's label type is in the highlight map
 		if (annotation.id && annotation.labelType) {

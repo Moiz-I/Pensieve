@@ -1,4 +1,5 @@
 import type { Relationship } from "../../utils/relationshipTypes";
+import { XYPosition } from "reactflow";
 
 export type ModelName = "gpt4o-mini" | "gpt-4o" | "claude-3.5";
 
@@ -12,6 +13,10 @@ export type HighlightWithText = {
 		labelType: string;
 		type: string;
 	};
+	// New fields for graph view
+	position?: XYPosition;
+	// Optional flag to indicate if this was created in graph view
+	createdInGraphView?: boolean;
 };
 
 export interface ModelResponse {

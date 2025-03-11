@@ -20,7 +20,7 @@ const App = () => {
 								/>
 							</Link>
 						</div>
-						<div className="absolute right-0 top-0">
+						<div className="fixed right-6 top-6">
 							<Link to="/evals" className="hover:text-slate-800 text-sm">
 								Model Evaluation
 							</Link>

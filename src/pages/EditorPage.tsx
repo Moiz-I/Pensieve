@@ -5,9 +5,12 @@ import { ReactFrameworkOutput } from "@remirror/react";
 import { EntityReferenceExtension } from "remirror/extensions";
 import { useLiveQuery } from "dexie-react-hooks";
 import Editor from "../components/Editor";
+import ArgumentGraph from "../components/ArgumentGraph";
 import { SessionManager } from "../utils/sessionManager";
 import { modelServices } from "../services/models";
 import { detailedPrompt } from "../evals/prompts";
+import type { HighlightWithText } from "../services/models/types";
+import type { Relationship } from "../utils/relationshipTypes";
 
 type EditorPageProps = {
 	mode: "input" | "analysis";
@@ -24,6 +27,8 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 	const [pendingHighlightRemoval, setPendingHighlightRemoval] = useState(false);
 	// Track multiple document change events with the same ID to detect race conditions
 	const currentChangeIds = useRef(new Set<string>());
+	// Add state for view mode
+	const [viewMode, setViewMode] = useState<"text" | "graph">("text");
 
 	const session = useLiveQuery(async () => {
 		if (!id) return null;
@@ -194,6 +199,53 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 		}
 	};
 
+	// New handler for updates from the graph view
+	const handleGraphHighlightsChange = useCallback(
+		async (updatedHighlights: HighlightWithText[]) => {
+			if (!id || !session?.analysedContent) return;
+
+			try {
+				await SessionManager.updateAnalysedContent(
+					parseInt(id),
+					session.analysedContent.content,
+					updatedHighlights,
+					session.analysedContent.relationships
+				);
+			} catch (error) {
+				console.error("Error updating highlights from graph:", error);
+				setError(
+					error instanceof Error
+						? error.message
+						: "Failed to update highlights from graph view"
+				);
+			}
+		},
+		[id, session]
+	);
+
+	const handleGraphRelationshipsChange = useCallback(
+		async (updatedRelationships: Relationship[]) => {
+			if (!id || !session?.analysedContent) return;
+
+			try {
+				await SessionManager.updateAnalysedContent(
+					parseInt(id),
+					session.analysedContent.content,
+					session.analysedContent.highlights,
+					updatedRelationships
+				);
+			} catch (error) {
+				console.error("Error updating relationships from graph:", error);
+				setError(
+					error instanceof Error
+						? error.message
+						: "Failed to update relationships from graph view"
+				);
+			}
+		},
+		[id, session]
+	);
+
 	if (!session || !content) {
 		return (
 			<div className="flex items-center justify-center h-screen">
@@ -248,19 +300,59 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 						</button>
 					</div>
 				)}
+
+				{/* Add view toggle when in analysis mode */}
+				{mode === "analysis" && (
+					<div className="flex justify-center">
+						<div className="inline-flex rounded-md shadow-sm" role="group">
+							<button
+								type="button"
+								className={`px-4 py-2 text-sm font-medium ${
+									viewMode === "text"
+										? "bg-zinc-700 text-white"
+										: "bg-white text-zinc-700 hover:bg-zinc-100"
+								} rounded-l-lg border border-zinc-200`}
+								onClick={() => setViewMode("text")}
+							>
+								Text View
+							</button>
+							<button
+								type="button"
+								className={`px-4 py-2 text-sm font-medium ${
+									viewMode === "graph"
+										? "bg-zinc-700 text-white"
+										: "bg-white text-zinc-700 hover:bg-zinc-100"
+								} rounded-r-lg border border-zinc-200`}
+								onClick={() => setViewMode("graph")}
+							>
+								Graph View
+							</button>
+						</div>
+					</div>
+				)}
 			</div>
 
 			<div className="remirror-theme">
-				<div className="max-w-4xl mx-auto">
-					<Editor
-						ref={editorRef}
-						initialContent={content.content}
-						showHighlightButtons={mode === "analysis"}
-						renderSidebar={mode === "analysis"}
-						highlights={content.highlights || []}
-						relationships={content.relationships || []}
-						onChangeJSON={handleEditorChange}
-					/>
+				<div className={viewMode === "graph" ? "w-full" : "max-w-4xl mx-auto"}>
+					{/* Conditionally render Editor or ArgumentGraph based on viewMode */}
+					{viewMode === "text" || mode === "input" ? (
+						<Editor
+							ref={editorRef}
+							initialContent={content.content}
+							showHighlightButtons={mode === "analysis"}
+							renderSidebar={mode === "analysis"}
+							highlights={content.highlights || []}
+							relationships={content.relationships || []}
+							onChangeJSON={handleEditorChange}
+						/>
+					) : (
+						<ArgumentGraph
+							highlights={content.highlights || []}
+							relationships={content.relationships || []}
+							onHighlightsChange={handleGraphHighlightsChange}
+							onRelationshipsChange={handleGraphRelationshipsChange}
+						/>
+					)}
 
 					{/* Debug Logs Section */}
 					<div className="mt-8 border border-gray-200 rounded-md">

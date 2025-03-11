@@ -307,9 +307,28 @@ export class SessionManager {
 		const isDeliberateHighlightRemoval =
 			highlights.length === 0 && session.analysedContent.highlights.length > 0;
 
+		// Check for highlights created in the graph view
+		const graphCreatedHighlights = highlights.filter(
+			(h) => h.createdInGraphView
+		);
+
+		// Add graph-created highlights to the document if any
+		let updatedContent = content;
+		if (graphCreatedHighlights.length > 0) {
+			updatedContent = this.appendGraphHighlightsToDocument(
+				content,
+				graphCreatedHighlights
+			);
+
+			// Once added to the document, clear the createdInGraphView flag
+			graphCreatedHighlights.forEach((h) => {
+				h.createdInGraphView = false;
+			});
+		}
+
 		// Determine which highlights to use
 		let highlightsToUse = highlights;
-		let contentWithHighlights = content;
+		let contentWithHighlights = updatedContent;
 
 		if (isDeliberateHighlightRemoval) {
 			// Keep the content as-is, don't extract or reapply highlights
@@ -317,39 +336,31 @@ export class SessionManager {
 		} else if (highlightsToUse.length === 0) {
 			// If no highlights provided and not explicitly removing, try to extract them
 			highlightsToUse = await SessionManager.extractHighlightsFromContentMarks(
-				content
+				contentWithHighlights,
+				session.analysedContent.highlights || [] // Pass existing highlights to preserve positions
 			);
 
 			// Apply highlights to ensure consistency
 			const { createDocumentWithMarks } = await import(
 				"../services/annotation/documentUtils"
 			);
-			contentWithHighlights = createDocumentWithMarks(content, highlightsToUse);
+			contentWithHighlights = createDocumentWithMarks(
+				contentWithHighlights,
+				highlightsToUse
+			);
 		} else {
-			// Normal case - we have highlights provided
-
-			// Don't re-apply highlights when explicitly updating with fewer highlights
-			// (indicates intentional highlight removal)
-			const highlightsWereRemoved =
-				session.analysedContent.highlights.length > highlights.length;
-
-			if (highlightsWereRemoved) {
-				// Keep content as-is
-			} else {
-				// Apply highlights to ensure consistency
-				const { createDocumentWithMarks } = await import(
-					"../services/annotation/documentUtils"
-				);
-				contentWithHighlights = createDocumentWithMarks(
-					content,
-					highlightsToUse
-				);
-			}
+			// Apply the provided highlights to the document
+			const { createDocumentWithMarks } = await import(
+				"../services/annotation/documentUtils"
+			);
+			contentWithHighlights = createDocumentWithMarks(
+				contentWithHighlights,
+				highlightsToUse
+			);
 		}
 
-		const update = {
-			...session,
-			highlightCount: highlightsToUse.length,
+		// update the session
+		await db.sessions.update(sessionId, {
 			analysedContent: {
 				...session.analysedContent,
 				content: contentWithHighlights,
@@ -359,9 +370,76 @@ export class SessionManager {
 				updatedAt: new Date(),
 			},
 			lastModified: new Date(),
-		};
+		});
+	}
 
-		await db.sessions.update(sessionId, update);
+	/**
+	 * Append highlights created in the graph view to the document
+	 */
+	static appendGraphHighlightsToDocument(
+		document: RemirrorJSON,
+		graphHighlights: HighlightType
+	): RemirrorJSON {
+		// Make a deep copy of the document to avoid modifying the original
+		const newDocument = JSON.parse(JSON.stringify(document)) as RemirrorJSON;
+
+		if (!newDocument.content) {
+			newDocument.content = [];
+		}
+
+		// Only proceed if we have highlights to add
+		if (graphHighlights.length === 0) {
+			return newDocument;
+		}
+
+		// Create paragraph content for graph-created highlights
+		const graphParagraphContent: {
+			type: string;
+			text?: string;
+			marks?: {
+				type: string;
+				attrs: {
+					id: string;
+					labelType: string;
+					type: string;
+				};
+			}[];
+		}[] = [];
+
+		// Add each graph highlight as a text node
+		graphHighlights.forEach((highlight) => {
+			// Add a line break between items if not the first item
+			if (graphParagraphContent.length > 0) {
+				graphParagraphContent.push({
+					type: "text",
+					text: "\n",
+				});
+			}
+
+			// Add the highlight text with the appropriate marker
+			graphParagraphContent.push({
+				type: "text",
+				text: highlight.text,
+				marks: [
+					{
+						type: "entity-reference",
+						attrs: {
+							id: highlight.id,
+							labelType: highlight.labelType,
+							type: highlight.labelType,
+						},
+					},
+				],
+			});
+		});
+
+		// Add the new paragraph to the document
+		newDocument.content.push({
+			type: "paragraph",
+			content: graphParagraphContent,
+		});
+
+		return newDocument;
 	}
 
 	/**
@@ -418,7 +496,8 @@ export class SessionManager {
 
 			// If no stored highlights, extract them from content marks
 			const highlights = await this.extractHighlightsFromContentMarks(
-				session.analysedContent.content
+				session.analysedContent.content,
+				session.analysedContent.highlights || [] // Pass existing highlights if available
 			);
 
 			return {
@@ -449,10 +528,17 @@ export class SessionManager {
 
 	// Helper function to extract highlights from content marks
 	static async extractHighlightsFromContentMarks(
-		content: RemirrorJSON
+		content: RemirrorJSON,
+		existingHighlights: HighlightWithText[] = []
 	): Promise<HighlightType> {
 		const highlights: HighlightType = [];
 		const seenIds = new Set<string>();
+
+		// Create a map of existing highlights by ID to quickly look up positions
+		const existingHighlightsMap = new Map<string, HighlightWithText>();
+		existingHighlights.forEach((highlight) => {
+			existingHighlightsMap.set(highlight.id, highlight);
+		});
 
 		// Recursive function to traverse the document and find entity reference marks
 		const processNode = (node: DocNode, textPosition = 0): number => {
@@ -494,13 +580,20 @@ export class SessionManager {
 					// Always keep the highlight map in sync
 					setHighlight(id, labelType);
 
-					// Add to highlights list
+					// Check if we have an existing highlight with this ID to preserve position
+					const existingHighlight = existingHighlightsMap.get(id);
+
+					// Add to highlights list, preserving position if available
 					highlights.push({
 						id,
 						labelType,
 						text: node.text,
 						startIndex: textPosition,
 						endIndex: textPosition + node.text.length,
+						// Preserve position data if it exists in the original highlight
+						...(existingHighlight?.position && {
+							position: existingHighlight.position,
+						}),
 					});
 				}
 

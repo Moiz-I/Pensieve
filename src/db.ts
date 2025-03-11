@@ -106,6 +106,37 @@ export class EditorDatabase extends Dexie {
 				"++id, sessionId, generatedAt, isInitialQuestion, wasShown",
 		});
 
+		// Add a new version to support position information for highlights
+		this.version(14)
+			.stores({
+				editorContent: "++id, updatedAt",
+				sessions: "++id, createdAt, status, lastModified, highlightCount",
+				dynamicQuestions:
+					"++id, sessionId, generatedAt, isInitialQuestion, wasShown",
+			})
+			.upgrade(() => {
+			});
+
+		// Add version 15 with explicit support for preserving position data in highlights
+		this.version(15)
+			.stores({
+				editorContent: "++id, updatedAt",
+				sessions: "++id, createdAt, status, lastModified, highlightCount",
+				dynamicQuestions:
+					"++id, sessionId, generatedAt, isInitialQuestion, wasShown",
+			})
+			.upgrade(async (trans) => {
+
+				// Process each session to ensure position data is preserved
+				const sessions = await trans.table("sessions").toCollection().toArray();
+
+				for (const session of sessions) {
+					if (session.analysedContent?.highlights) {
+						await trans.table("sessions").update(session.id!, session);
+					}
+				}
+			});
+
 		// Add hooks to ensure content is properly handled
 		this.sessions.hook("reading", (obj) => {
 			if (obj.analysedContent?.content) {
