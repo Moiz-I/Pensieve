@@ -272,20 +272,9 @@ export const ClaimsView = ({
 	);
 
 	return (
-		<div className="claims-view-container">
-			<div className="flex justify-between items-center mb-4">
-				<h2 className="text-xl font-serif">Claims Analysis</h2>
-				<button
-					onClick={() => handleAddClaim("")}
-					className="px-3 py-1 bg-zinc-700 text-white rounded hover:bg-zinc-800 text-sm"
-					disabled={isLoading}
-				>
-					{isLoading ? "Processing..." : "Add New Claim"}
-				</button>
-			</div>
-
+		<div>
 			{error && (
-				<div className="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4">
+				<div className="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded relative mb4-">
 					<span className="block sm:inline">{error}</span>
 					<button
 						className="absolute top-0 bottom-0 right-0 px-4 py-3"
@@ -310,7 +299,7 @@ export const ClaimsView = ({
 					No claims found in the current text.
 				</div>
 			) : (
-				<div className="claims-list space-y-4">
+				<div className="claims-list space-y-4 mt-6">
 					{claimsData.map(({ claim, evidence }) => (
 						<ClaimCard
 							key={claim.id}

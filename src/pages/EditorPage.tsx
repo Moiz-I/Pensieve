@@ -398,7 +398,7 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 									setViewMode("text");
 								}}
 							>
-								Text View
+								Full Text
 							</button>
 							<button
 								type="button"
@@ -411,7 +411,7 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 									setViewMode("graph");
 								}}
 							>
-								Graph View
+								Canvas
 							</button>
 							<button
 								type="button"
@@ -424,7 +424,7 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 									setViewMode("claims");
 								}}
 							>
-								Claims View
+								Claims
 							</button>
 						</div>
 					</div>
