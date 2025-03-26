@@ -34,7 +34,7 @@ export const ClaimCard = ({
 		setEditText(evidence.text);
 	};
 
-	const handleSaveEdit = (id: string, type: "claim" | "evidence") => {
+	const handleSaveEdit = (id: string) => {
 		if (!editText.trim()) return;
 		onEdit(id, editText.trim());
 		setIsEditingClaim(false);
@@ -63,7 +63,7 @@ export const ClaimCard = ({
 							/>
 							<div className="flex gap-2">
 								<button
-									onClick={() => handleSaveEdit(claim.id, "claim")}
+									onClick={() => handleSaveEdit(claim.id)}
 									className="px-3 py-1 bg-zinc-700 text-white rounded hover:bg-zinc-800 text-sm"
 								>
 									Save
@@ -159,7 +159,7 @@ export const ClaimCard = ({
 										/>
 										<div className="flex gap-2">
 											<button
-												onClick={() => handleSaveEdit(item.id, "evidence")}
+												onClick={() => handleSaveEdit(item.id)}
 												className="px-3 py-1 bg-zinc-700 text-white rounded hover:bg-zinc-800 text-sm"
 											>
 												Save
