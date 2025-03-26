@@ -71,7 +71,6 @@ const Editor = forwardRef<
 		},
 		stringHandler: "html",
 		onError: ({ json }) => {
-			console.log("🔧 Handling invalid content");
 			setErrorState("Invalid content detected. Resetting to empty document.");
 			// Return a valid empty document if we can't handle the content
 			return {
@@ -97,6 +96,35 @@ const Editor = forwardRef<
 		() => getContext() as ReactFrameworkOutput<EntityReferenceExtension>,
 		[getContext]
 	);
+
+	// Reinitialize editor when initialContent changes substantially
+	useEffect(() => {
+		if (!manager || !props.initialContent) return;
+
+		try {
+			// Create a new state with the updated content
+			const newState = manager.createState({
+				content: props.initialContent,
+				stringHandler: "html",
+			});
+
+			// Update the editor state
+			setState(newState);
+
+			// Make sure to clear and repopulate the highlight map
+			clearHighlights();
+
+			// Populate the highlight map from the props
+			props.highlights?.forEach((highlight) => {
+				if (highlight.id && highlight.labelType) {
+					setHighlight(highlight.id, highlight.labelType);
+				}
+			});
+		} catch (error) {
+			console.error("❌ [Editor] Error reinitializing editor:", error);
+			setErrorState("Error loading content. Please refresh the page.");
+		}
+	}, [props.initialContent, props.highlights, manager, setState]);
 
 	// Combined useEffect for initialization and highlight syncing
 	useEffect(() => {

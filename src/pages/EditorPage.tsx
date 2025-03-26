@@ -6,6 +6,7 @@ import { EntityReferenceExtension } from "remirror/extensions";
 import { useLiveQuery } from "dexie-react-hooks";
 import Editor from "../components/Editor";
 import ArgumentGraph from "../components/ArgumentGraph";
+import { ClaimsView } from "../components/ClaimsView";
 import { SessionManager } from "../utils/sessionManager";
 import { modelServices } from "../services/models";
 import { detailedPrompt } from "../evals/prompts";
@@ -28,7 +29,7 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 	// Track multiple document change events with the same ID to detect race conditions
 	const currentChangeIds = useRef(new Set<string>());
 	// Add state for view mode
-	const [viewMode, setViewMode] = useState<"text" | "graph">("text");
+	const [viewMode, setViewMode] = useState<"text" | "graph" | "claims">("text");
 
 	const session = useLiveQuery(async () => {
 		if (!id) return null;
@@ -41,7 +42,7 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 		if (!id) return null;
 		const result = await SessionManager.getEffectiveContent(parseInt(id));
 		return result;
-	}, [id]);
+	}, [id, viewMode]);
 
 	const handleEditorChange = useCallback(
 		async (json: RemirrorJSON, options?: { skipExtraction?: boolean }) => {
@@ -90,58 +91,69 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 				if (mode === "input") {
 					await SessionManager.updateInputContent(parseInt(id), json);
 				} else if (mode === "analysis" && session?.analysedContent) {
-					// Check if this is a highlight removal operation, which can be detected by:
-					// 1. Explicit skipExtraction flag
-					// 2. Missing entity reference marks that were present in previous state
-					// 3. We're in a pending highlight removal state
+					// Get current highlights and relationships
+					const currentHighlights = session.analysedContent.highlights || [];
+					const currentRelationships =
+						session.analysedContent.relationships || [];
 
-					// Get current highlight count from session
-					const currentHighlightCount =
-						session.analysedContent.highlights.length;
-
-					// Skip extraction if explicitly requested or we're in pending removal state
+					// If we're in a highlight removal state, preserve the content as-is
 					if (options?.skipExtraction || pendingHighlightRemoval) {
-						// Empty array signals to preserve the content as-is
 						await SessionManager.updateAnalysedContent(
 							parseInt(id),
 							json,
-							[], // Empty highlight array
-							session.analysedContent.relationships
+							[], // Empty highlight array to preserve content
+							currentRelationships
 						);
 					} else {
-						// Normal path: Extract highlights directly from the document
+						// Extract highlights from the document
 						const extractedHighlights =
-							await SessionManager.extractHighlightsFromContentMarks(json);
-
-						// If we found fewer highlights than expected, this might be a removal operation
-						// triggered by automatic onChange rather than our explicit skipExtraction call
-						if (extractedHighlights.length < currentHighlightCount) {
-							// Preserve the new content with the extracted highlights
-							await SessionManager.updateAnalysedContent(
-								parseInt(id),
+							await SessionManager.extractHighlightsFromContentMarks(
 								json,
-								extractedHighlights, // Use the extracted highlights directly
-								session.analysedContent.relationships
+								currentHighlights // Pass existing highlights to preserve positions
 							);
-						} else {
-							// Regular update with the extracted highlights
+
+						// Create a map of existing highlights by ID for quick lookup
+						const existingHighlightsMap = new Map(
+							currentHighlights.map((h) => [h.id, h])
+						);
+
+						// Check if any highlights were modified
+						const hasHighlightModifications = extractedHighlights.some(
+							(highlight) => {
+								const existing = existingHighlightsMap.get(highlight.id);
+								return existing && existing.text !== highlight.text;
+							}
+						);
+
+						if (hasHighlightModifications) {
+							// If highlights were modified, update both content and highlights
 							await SessionManager.updateAnalysedContent(
 								parseInt(id),
 								json,
 								extractedHighlights,
-								session.analysedContent.relationships
+								currentRelationships
+							);
+						} else {
+							// If no highlight modifications, just update the content
+							await SessionManager.updateAnalysedContent(
+								parseInt(id),
+								json,
+								currentHighlights,
+								currentRelationships
 							);
 						}
 					}
 				}
 			} catch (error) {
 				console.error(`Error in handleEditorChange: ${error}`);
+				setError(
+					error instanceof Error ? error.message : "Failed to update content"
+				);
 			} finally {
-				// Ensure we clear the change ID even if there was an error
 				clearChangeId();
 			}
 		},
-		[id, mode, session, pendingHighlightRemoval]
+		[id, mode, session, pendingHighlightRemoval, currentChangeIds]
 	);
 
 	const handleAnalyse = async () => {
@@ -192,7 +204,6 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 			// Navigate to analysis view
 			navigate(`/analysis/${id}`);
 		} catch (error) {
-			console.error("Analysis failed:", error);
 			setError(error instanceof Error ? error.message : "Unknown error");
 		} finally {
 			setIsAnalysing(false);
@@ -205,14 +216,31 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 			if (!id || !session?.analysedContent) return;
 
 			try {
+				// Get current content
+				const currentContent = session.analysedContent.content;
+				const currentRelationships =
+					session.analysedContent.relationships || [];
+
+				const { createDocumentWithMarks } = await import(
+					"../services/annotation/documentUtils"
+				);
+				const updatedContent = createDocumentWithMarks(
+					currentContent,
+					updatedHighlights
+				);
+
+				// Update in the database
 				await SessionManager.updateAnalysedContent(
 					parseInt(id),
-					session.analysedContent.content,
+					updatedContent,
 					updatedHighlights,
-					session.analysedContent.relationships
+					currentRelationships
 				);
 			} catch (error) {
-				console.error("Error updating highlights from graph:", error);
+				console.error(
+					"❌ [EditorPage] Error updating highlights from graph:",
+					error
+				);
 				setError(
 					error instanceof Error
 						? error.message
@@ -228,10 +256,24 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 			if (!id || !session?.analysedContent) return;
 
 			try {
+				// Get current content and highlights
+				const currentContent = session.analysedContent.content;
+				const currentHighlights = session.analysedContent.highlights || [];
+
+				// Update content with current highlights to ensure consistency
+				const { createDocumentWithMarks } = await import(
+					"../services/annotation/documentUtils"
+				);
+				const updatedContent = createDocumentWithMarks(
+					currentContent,
+					currentHighlights
+				);
+
+				// Update in the database
 				await SessionManager.updateAnalysedContent(
 					parseInt(id),
-					session.analysedContent.content,
-					session.analysedContent.highlights,
+					updatedContent,
+					currentHighlights,
 					updatedRelationships
 				);
 			} catch (error) {
@@ -240,6 +282,46 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 					error instanceof Error
 						? error.message
 						: "Failed to update relationships from graph view"
+				);
+			}
+		},
+		[id, session]
+	);
+
+	// New handler for updates from the claims view
+	const handleClaimsHighlightsChange = useCallback(
+		async (updatedHighlights: HighlightWithText[]) => {
+			if (!id || !session?.analysedContent) return;
+
+			try {
+				// Get current content and relationships
+				const currentContent = session.analysedContent.content;
+				const currentRelationships =
+					session.analysedContent.relationships || [];
+
+				const { createDocumentWithMarks } = await import(
+					"../services/annotation/documentUtils"
+				);
+				const updatedContent = createDocumentWithMarks(
+					currentContent,
+					updatedHighlights
+				);
+
+				await SessionManager.updateAnalysedContent(
+					parseInt(id),
+					updatedContent,
+					updatedHighlights,
+					currentRelationships
+				);
+			} catch (error) {
+				console.error(
+					`❌ [EditorPage] Error updating highlights from claims:`,
+					error
+				);
+				setError(
+					error instanceof Error
+						? error.message
+						: "Failed to update highlights from claims view"
 				);
 			}
 		},
@@ -312,7 +394,9 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 										? "bg-zinc-700 text-white"
 										: "bg-white text-zinc-700 hover:bg-zinc-100"
 								} rounded-l-lg border border-zinc-200`}
-								onClick={() => setViewMode("text")}
+								onClick={() => {
+									setViewMode("text");
+								}}
 							>
 								Text View
 							</button>
@@ -322,10 +406,25 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 									viewMode === "graph"
 										? "bg-zinc-700 text-white"
 										: "bg-white text-zinc-700 hover:bg-zinc-100"
-								} rounded-r-lg border border-zinc-200`}
-								onClick={() => setViewMode("graph")}
+								} border-t border-b border-zinc-200`}
+								onClick={() => {
+									setViewMode("graph");
+								}}
 							>
 								Graph View
+							</button>
+							<button
+								type="button"
+								className={`px-4 py-2 text-sm font-medium ${
+									viewMode === "claims"
+										? "bg-zinc-700 text-white"
+										: "bg-white text-zinc-700 hover:bg-zinc-100"
+								} rounded-r-lg border border-zinc-200`}
+								onClick={() => {
+									setViewMode("claims");
+								}}
+							>
+								Claims View
 							</button>
 						</div>
 					</div>
@@ -334,9 +433,10 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 
 			<div className="remirror-theme">
 				<div className={viewMode === "graph" ? "w-full" : "max-w-4xl mx-auto"}>
-					{/* Conditionally render Editor or ArgumentGraph based on viewMode */}
+					{/* Conditionally render Editor, ArgumentGraph, or ClaimsView based on viewMode */}
 					{viewMode === "text" || mode === "input" ? (
 						<Editor
+							key={`editor-${viewMode}-${content?.highlights?.length || 0}`}
 							ref={editorRef}
 							initialContent={content.content}
 							showHighlightButtons={mode === "analysis"}
@@ -345,12 +445,20 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 							relationships={content.relationships || []}
 							onChangeJSON={handleEditorChange}
 						/>
-					) : (
+					) : viewMode === "graph" ? (
 						<ArgumentGraph
 							highlights={content.highlights || []}
 							relationships={content.relationships || []}
 							onHighlightsChange={handleGraphHighlightsChange}
 							onRelationshipsChange={handleGraphRelationshipsChange}
+						/>
+					) : (
+						<ClaimsView
+							highlights={content.highlights || []}
+							relationships={content.relationships || []}
+							onHighlightsChange={handleClaimsHighlightsChange}
+							onRelationshipsChange={handleGraphRelationshipsChange}
+							sessionId={parseInt(id || "0")}
 						/>
 					)}
 

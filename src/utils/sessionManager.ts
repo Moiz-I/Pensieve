@@ -151,8 +151,6 @@ export class SessionManager {
 				annotations,
 				[] // No relationships initially
 			);
-
-			console.log(`Analysed text with ${annotations.length} annotations`);
 		} catch (error) {
 			console.error("Error analysing with Hugging Face:", error);
 			throw new Error(`Failed to analyse with Hugging Face: ${error}`);
@@ -295,82 +293,30 @@ export class SessionManager {
 		highlights: HighlightType,
 		relationships: Relationship[]
 	): Promise<void> {
-		const session = await db.sessions.get(sessionId);
-		if (!session || !session.analysedContent) {
-			throw new Error(
-				`Cannot update analysed content for session ${sessionId}: Session not found or has no analysed content`
-			);
-		}
+		try {
+			const session = await db.sessions.get(sessionId);
+			if (!session || !session.analysedContent) {
+				throw new Error(
+					`Cannot update analysed content for session ${sessionId}: Session not found or has no analysed content`
+				);
+			}
 
-		// Special case: Empty highlights array with content changes means we deliberately removed highlights
-		// and we should keep the content as-is without trying to re-extract or re-apply highlights
-		const isDeliberateHighlightRemoval =
-			highlights.length === 0 && session.analysedContent.highlights.length > 0;
-
-		// Check for highlights created in the graph view
-		const graphCreatedHighlights = highlights.filter(
-			(h) => h.createdInGraphView
-		);
-
-		// Add graph-created highlights to the document if any
-		let updatedContent = content;
-		if (graphCreatedHighlights.length > 0) {
-			updatedContent = this.appendGraphHighlightsToDocument(
-				content,
-				graphCreatedHighlights
-			);
-
-			// Once added to the document, clear the createdInGraphView flag
-			graphCreatedHighlights.forEach((h) => {
-				h.createdInGraphView = false;
+			// Simply update the session with the new content and highlights
+			await db.sessions.update(sessionId, {
+				analysedContent: {
+					...session.analysedContent,
+					content,
+					highlights,
+					relationships,
+					highlightCount: highlights.length,
+					updatedAt: new Date(),
+				},
+				lastModified: new Date(),
 			});
+		} catch (error) {
+			console.error(`❌ [SessionManager] Error updating content:`, error);
+			throw error;
 		}
-
-		// Determine which highlights to use
-		let highlightsToUse = highlights;
-		let contentWithHighlights = updatedContent;
-
-		if (isDeliberateHighlightRemoval) {
-			// Keep the content as-is, don't extract or reapply highlights
-			highlightsToUse = [];
-		} else if (highlightsToUse.length === 0) {
-			// If no highlights provided and not explicitly removing, try to extract them
-			highlightsToUse = await SessionManager.extractHighlightsFromContentMarks(
-				contentWithHighlights,
-				session.analysedContent.highlights || [] // Pass existing highlights to preserve positions
-			);
-
-			// Apply highlights to ensure consistency
-			const { createDocumentWithMarks } = await import(
-				"../services/annotation/documentUtils"
-			);
-			contentWithHighlights = createDocumentWithMarks(
-				contentWithHighlights,
-				highlightsToUse
-			);
-		} else {
-			// Apply the provided highlights to the document
-			const { createDocumentWithMarks } = await import(
-				"../services/annotation/documentUtils"
-			);
-			contentWithHighlights = createDocumentWithMarks(
-				contentWithHighlights,
-				highlightsToUse
-			);
-		}
-
-		// update the session
-		await db.sessions.update(sessionId, {
-			analysedContent: {
-				...session.analysedContent,
-				content: contentWithHighlights,
-				highlights: highlightsToUse,
-				relationships,
-				highlightCount: highlightsToUse.length,
-				updatedAt: new Date(),
-			},
-			lastModified: new Date(),
-		});
 	}
 
 	/**
@@ -478,8 +424,15 @@ export class SessionManager {
 		highlights?: HighlightType;
 		relationships?: Relationship[];
 	}> {
+		console.log(
+			`📋 [SessionManager] Getting effective content for session ${sessionId}`
+		);
+
 		const session = await this.getSession(sessionId);
-		if (!session) throw new Error("Session not found");
+		if (!session) {
+			console.error(`❌ [SessionManager] Session not found: ${sessionId}`);
+			throw new Error("Session not found");
+		}
 
 		if (session.analysedContent) {
 			// Use the stored highlights if they exist
@@ -493,8 +446,6 @@ export class SessionManager {
 					relationships: session.analysedContent.relationships,
 				};
 			}
-
-			// If no stored highlights, extract them from content marks
 			const highlights = await this.extractHighlightsFromContentMarks(
 				session.analysedContent.content,
 				session.analysedContent.highlights || [] // Pass existing highlights if available
@@ -507,7 +458,6 @@ export class SessionManager {
 			};
 		}
 
-		// If no analysed content, return input content
 		return {
 			content: session.inputContent.content,
 		};

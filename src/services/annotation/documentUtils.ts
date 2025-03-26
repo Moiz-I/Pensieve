@@ -9,11 +9,26 @@ import { setHighlight } from "../../utils/highlightMap";
  * @returns A new Remirror JSON document with the annotations applied as marks
  */
 
+// Add a helper function to find highlight by ID with full annotation info
+function findAnnotationById(
+	annotations: HighlightWithText[],
+	id: string
+): HighlightWithText | undefined {
+	return annotations.find((annotation) => annotation.id === id);
+}
+
 export function createDocumentWithMarks(
 	originalContent: RemirrorJSON,
 	annotations: HighlightWithText[]
 ): RemirrorJSON {
+	console.log(
+		`🔍 [documentUtils] Creating document with ${annotations.length} highlights`
+	);
+
 	if (!annotations || annotations.length === 0) {
+		console.log(
+			`ℹ️ [documentUtils] No annotations provided, returning original content`
+		);
 		return { ...originalContent };
 	}
 
@@ -46,8 +61,30 @@ export function createDocumentWithMarks(
 			for (const annotation of annotations) {
 				if (!annotation.text) continue;
 
-				// If this annotation text is in this paragraph
-				if (paragraphText.includes(annotation.text)) {
+				// If this annotation text is in this paragraph or we can find an existing highlight with the same ID
+				const paragraphContainsText = paragraphText.includes(annotation.text);
+
+				// Check for existing marks with this ID to handle text updates
+				let hasExistingMark = false;
+				if (paragraph.content) {
+					for (const node of paragraph.content) {
+						if (node.marks) {
+							for (const mark of node.marks) {
+								if (
+									typeof mark === "object" &&
+									mark.attrs &&
+									mark.attrs.id === annotation.id
+								) {
+									hasExistingMark = true;
+									break;
+								}
+							}
+						}
+						if (hasExistingMark) break;
+					}
+				}
+
+				if (paragraphContainsText || hasExistingMark) {
 					// Add to map
 					if (!annotationsByParagraph.has(paragraphIndex)) {
 						annotationsByParagraph.set(paragraphIndex, []);
@@ -57,6 +94,11 @@ export function createDocumentWithMarks(
 			}
 		});
 	}
+
+	// Log annotation distribution for debugging
+	console.log(
+		`📊 [documentUtils] Annotations distributed across ${annotationsByParagraph.size} paragraphs`
+	);
 
 	// Second pass: process annotations paragraph by paragraph
 	annotationsByParagraph.forEach((paragraphAnnotations, paragraphIndex) => {
@@ -99,6 +141,7 @@ export function createDocumentWithMarks(
 			text: string;
 			startIndex: number;
 			endIndex: number;
+			originalText?: string; // Track original text for replacement
 		}> = [];
 
 		if (paragraph.content) {
@@ -123,6 +166,7 @@ export function createDocumentWithMarks(
 									id,
 									labelType,
 									text: node.text || "",
+									originalText: node.text || "", // Store the original text
 									startIndex: pos,
 									endIndex: pos + (node.text?.length || 0),
 								});
@@ -137,9 +181,32 @@ export function createDocumentWithMarks(
 		// Combine existing and new highlights
 		const allHighlights = [...existingHighlights];
 
-		// Add new highlights that aren't duplicates
+		// Add new highlights that aren't duplicates and update text for existing highlights
 		paragraphAnnotations.forEach((annotation) => {
-			if (!allHighlights.some((h) => h.id === annotation.id)) {
+			// Find if there's an existing highlight with this ID
+			const existingIndex = allHighlights.findIndex(
+				(h) => h.id === annotation.id
+			);
+
+			if (existingIndex >= 0) {
+				// Check if the text has changed
+				if (allHighlights[existingIndex].text !== annotation.text) {
+					console.log(
+						`🔄 [documentUtils] Updating text for highlight ${annotation.id}:`,
+						{
+							old: allHighlights[existingIndex].text,
+							new: annotation.text,
+						}
+					);
+
+					// Update the existing highlight's text, but keep track of the original for replacement
+					allHighlights[existingIndex] = {
+						...allHighlights[existingIndex],
+						text: annotation.text || "",
+					};
+				}
+			} else {
+				// Add new highlight
 				const textIndex = paragraphText.indexOf(annotation.text || "");
 				if (textIndex >= 0) {
 					allHighlights.push({
@@ -149,6 +216,10 @@ export function createDocumentWithMarks(
 						startIndex: textIndex,
 						endIndex: textIndex + (annotation.text?.length || 0),
 					});
+				} else {
+					console.warn(
+						`⚠️ [documentUtils] Could not find text match for highlight ${annotation.id}: "${annotation.text}"`
+					);
 				}
 			}
 		});
@@ -184,12 +255,9 @@ export function createDocumentWithMarks(
 						});
 					}
 
-					// Highlighted text
+					// Highlighted text - use the updated annotation text, not original text
 					newSegments.push({
-						text: segment.text.substring(
-							highlightRelativeStart,
-							Math.min(highlightRelativeEnd, segment.text.length)
-						),
+						text: highlight.text,
 						highlights: [
 							...segment.highlights,
 							{
@@ -216,9 +284,40 @@ export function createDocumentWithMarks(
 			}
 
 			if (segmentIndex === -1) {
-				console.warn(
-					`[Debug] Could not find segment for highlight ${highlight.id}`
-				);
+				// If we couldn't find a segment but we know this is an existing highlight with updated text
+				// Look for it by ID in the source annotations
+				const annotation = findAnnotationById(annotations, highlight.id);
+				if (annotation) {
+					console.log(
+						`🔍 [documentUtils] Finding alternative placement for highlight ${highlight.id}`
+					);
+
+					// Try to find all segments with highlights from the same ID
+					for (let i = 0; i < segments.length; i++) {
+						const segment = segments[i];
+						const hasMatchingHighlight = segment.highlights.some(
+							(h) => h.id === highlight.id
+						);
+
+						if (hasMatchingHighlight) {
+							// Replace this segment with the updated text
+							const updatedSegment: TextSegment = {
+								...segment,
+								text: annotation.text || "",
+							};
+
+							segments[i] = updatedSegment;
+							console.log(
+								`✅ [documentUtils] Successfully placed highlight ${highlight.id} by ID match`
+							);
+							break;
+						}
+					}
+				} else {
+					console.warn(
+						`[Debug] Could not find segment for highlight ${highlight.id}`
+					);
+				}
 			}
 		}
 
