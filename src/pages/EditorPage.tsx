@@ -33,16 +33,31 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 
 	const session = useLiveQuery(async () => {
 		if (!id) return null;
-		const result = await SessionManager.getSession(parseInt(id));
-
-		return result;
-	}, [id]);
+		try {
+			const result = await SessionManager.getSession(parseInt(id));
+			if (!result) {
+				// If session doesn't exist, redirect to sessions page
+				navigate('/sessions');
+				return null;
+			}
+			return result;
+		} catch (error) {
+			console.error('Error fetching session:', error);
+			navigate('/sessions');
+			return null;
+		}
+	}, [id, navigate]);
 
 	const content = useLiveQuery(async () => {
-		if (!id) return null;
-		const result = await SessionManager.getEffectiveContent(parseInt(id));
-		return result;
-	}, [id, viewMode]);
+		if (!id || !session) return null;
+		try {
+			const result = await SessionManager.getEffectiveContent(parseInt(id));
+			return result;
+		} catch (error) {
+			console.error('Error fetching content:', error);
+			return null;
+		}
+	}, [id, session, viewMode]);
 
 	const handleEditorChange = useCallback(
 		async (json: RemirrorJSON, options?: { skipExtraction?: boolean }) => {

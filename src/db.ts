@@ -139,7 +139,7 @@ export class EditorDatabase extends Dexie {
 
 		// Add hooks to ensure content is properly handled
 		this.sessions.hook("reading", (obj) => {
-			if (obj.analysedContent?.content) {
+			if (obj?.analysedContent?.content) {
 				// Ensure the content is properly structured
 				if (!obj.analysedContent.content.type) {
 					obj.analysedContent.content = {
