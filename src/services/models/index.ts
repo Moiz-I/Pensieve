@@ -7,16 +7,14 @@ import type {
 	ModelName,
 } from "./types";
 
-// Create instances of each service
+// Create instances of the services
 const gpt4oMini = new OpenAIService("gpt4o-mini");
-const gpt4o = new OpenAIService("gpt-4o");
-const claude = new AnthropicService();
+const claude3 = new AnthropicService("claude-3.5");
 
 // Map model names to their services
 export const modelServices: Record<ModelName, ModelService> = {
 	"gpt4o-mini": gpt4oMini,
-	"gpt-4o": gpt4o,
-	"claude-3.5": claude,
+	"claude-3.5": claude3,
 };
 
 export type { ModelService, ModelConfig, ModelResponse, ModelName };

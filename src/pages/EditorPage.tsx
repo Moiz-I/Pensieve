@@ -5,11 +5,7 @@ import { ReactFrameworkOutput } from "@remirror/react";
 import { EntityReferenceExtension } from "remirror/extensions";
 import { useLiveQuery } from "dexie-react-hooks";
 import Editor from "../components/Editor";
-import ArgumentGraph from "../components/ArgumentGraph";
-import { ClaimsView } from "../components/ClaimsView";
 import { SessionManager } from "../utils/sessionManager";
-import { modelServices } from "../services/models";
-import { detailedPrompt } from "../evals/prompts";
 import type { HighlightWithText } from "../services/models/types";
 import type { Relationship } from "../utils/relationshipTypes";
 
@@ -22,14 +18,11 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 	const navigate = useNavigate();
 	const [isAnalysing, setIsAnalysing] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const editorRef =
-		useRef<ReactFrameworkOutput<EntityReferenceExtension>>(null);
+	const editorRef = useRef<ReactFrameworkOutput<EntityReferenceExtension>>(null);
 	// Track highlight removal operations
 	const [pendingHighlightRemoval, setPendingHighlightRemoval] = useState(false);
 	// Track multiple document change events with the same ID to detect race conditions
 	const currentChangeIds = useRef(new Set<string>());
-	// Add state for view mode
-	const [viewMode, setViewMode] = useState<"text" | "graph" | "claims">("text");
 
 	const session = useLiveQuery(async () => {
 		if (!id) return null;
@@ -57,7 +50,7 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 			console.error('Error fetching content:', error);
 			return null;
 		}
-	}, [id, session, viewMode]);
+	}, [id, session]);
 
 	const handleEditorChange = useCallback(
 		async (json: RemirrorJSON, options?: { skipExtraction?: boolean }) => {
@@ -108,8 +101,7 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 				} else if (mode === "analysis" && session?.analysedContent) {
 					// Get current highlights and relationships
 					const currentHighlights = session.analysedContent.highlights || [];
-					const currentRelationships =
-						session.analysedContent.relationships || [];
+					const currentRelationships = session.analysedContent.relationships || [];
 
 					// If we're in a highlight removal state, preserve the content as-is
 					if (options?.skipExtraction || pendingHighlightRemoval) {
@@ -160,187 +152,11 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 					}
 				}
 			} catch (error) {
-				console.error(`Error in handleEditorChange: ${error}`);
-				setError(
-					error instanceof Error ? error.message : "Failed to update content"
-				);
-			} finally {
-				clearChangeId();
+				console.error("Error handling editor change:", error);
+				setError("Error updating content. Please try again.");
 			}
 		},
-		[id, mode, session, pendingHighlightRemoval, currentChangeIds]
-	);
-
-	const handleAnalyse = async () => {
-		if (!id || !session || !content) return;
-		setIsAnalysing(true);
-		setError(null);
-
-		try {
-			// Get the GPT-4o-mini service
-			const service = modelServices["gpt4o-mini"];
-
-			// Extract text content from the editor
-			const textContent =
-				content.content?.content
-					?.map((paragraph) =>
-						paragraph.content
-							?.map((node) => node.text)
-							.filter(Boolean)
-							.join("")
-					)
-					.filter(Boolean)
-					.join("\n") || "";
-
-			// Prepare the prompt by replacing the text placeholder
-			const prompt = detailedPrompt.template.replace("{{text}}", textContent);
-
-			// Get API key from environment
-			const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-			if (!apiKey) {
-				throw new Error(
-					"OpenAI API key not found in environment variables. Please set VITE_OPENAI_API_KEY in your .env file."
-				);
-			}
-
-			// Send to OpenAI with API key
-			const analysis = await service.analyse(textContent, prompt, { apiKey });
-
-			// Save the analysis results
-			await SessionManager.saveAnalysis(
-				parseInt(id),
-				"gpt4o-mini",
-				detailedPrompt.id,
-				content.content,
-				analysis.highlights,
-				analysis.relationships
-			);
-
-			// Navigate to analysis view
-			navigate(`/analysis/${id}`);
-		} catch (error) {
-			setError(error instanceof Error ? error.message : "Unknown error");
-		} finally {
-			setIsAnalysing(false);
-		}
-	};
-
-	// New handler for updates from the graph view
-	const handleGraphHighlightsChange = useCallback(
-		async (updatedHighlights: HighlightWithText[]) => {
-			if (!id || !session?.analysedContent) return;
-
-			try {
-				// Get current content
-				const currentContent = session.analysedContent.content;
-				const currentRelationships =
-					session.analysedContent.relationships || [];
-
-				const { createDocumentWithMarks } = await import(
-					"../services/annotation/documentUtils"
-				);
-				const updatedContent = createDocumentWithMarks(
-					currentContent,
-					updatedHighlights
-				);
-
-				// Update in the database
-				await SessionManager.updateAnalysedContent(
-					parseInt(id),
-					updatedContent,
-					updatedHighlights,
-					currentRelationships
-				);
-			} catch (error) {
-				console.error(
-					"❌ [EditorPage] Error updating highlights from graph:",
-					error
-				);
-				setError(
-					error instanceof Error
-						? error.message
-						: "Failed to update highlights from graph view"
-				);
-			}
-		},
-		[id, session]
-	);
-
-	const handleGraphRelationshipsChange = useCallback(
-		async (updatedRelationships: Relationship[]) => {
-			if (!id || !session?.analysedContent) return;
-
-			try {
-				// Get current content and highlights
-				const currentContent = session.analysedContent.content;
-				const currentHighlights = session.analysedContent.highlights || [];
-
-				// Update content with current highlights to ensure consistency
-				const { createDocumentWithMarks } = await import(
-					"../services/annotation/documentUtils"
-				);
-				const updatedContent = createDocumentWithMarks(
-					currentContent,
-					currentHighlights
-				);
-
-				// Update in the database
-				await SessionManager.updateAnalysedContent(
-					parseInt(id),
-					updatedContent,
-					currentHighlights,
-					updatedRelationships
-				);
-			} catch (error) {
-				console.error("Error updating relationships from graph:", error);
-				setError(
-					error instanceof Error
-						? error.message
-						: "Failed to update relationships from graph view"
-				);
-			}
-		},
-		[id, session]
-	);
-
-	// New handler for updates from the claims view
-	const handleClaimsHighlightsChange = useCallback(
-		async (updatedHighlights: HighlightWithText[]) => {
-			if (!id || !session?.analysedContent) return;
-
-			try {
-				// Get current content and relationships
-				const currentContent = session.analysedContent.content;
-				const currentRelationships =
-					session.analysedContent.relationships || [];
-
-				const { createDocumentWithMarks } = await import(
-					"../services/annotation/documentUtils"
-				);
-				const updatedContent = createDocumentWithMarks(
-					currentContent,
-					updatedHighlights
-				);
-
-				await SessionManager.updateAnalysedContent(
-					parseInt(id),
-					updatedContent,
-					updatedHighlights,
-					currentRelationships
-				);
-			} catch (error) {
-				console.error(
-					`❌ [EditorPage] Error updating highlights from claims:`,
-					error
-				);
-				setError(
-					error instanceof Error
-						? error.message
-						: "Failed to update highlights from claims view"
-				);
-			}
-		},
-		[id, session]
+		[id, mode, session, pendingHighlightRemoval]
 	);
 
 	if (!session || !content) {
@@ -353,168 +169,36 @@ export const EditorPage = ({ mode }: EditorPageProps) => {
 	}
 
 	return (
-		<div className="p-4 mx-auto mb-32">
-			<div className="flex flex-col gap-4 mb-4">
-				<div className="flex justify-between items-center">
-					<h1 className="text-2xl font-serif text-center mx-auto">
-						{session.title}
-					</h1>
-					{mode === "input" && (
-						<button
-							onClick={handleAnalyse}
-							disabled={isAnalysing}
-							className="px-4 py-2 bg-zinc-700 text-white rounded hover:bg-zinc-800 disabled:opacity-50 flex items-center gap-2"
-						>
-							{isAnalysing && (
-								<div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-							)}
-							{isAnalysing ? "Analysing..." : "Analyse Text"}
-						</button>
-					)}
-				</div>
-
-				{error && (
-					<div
-						className="bg-red-50 border border-red-400 text-red-700 px-4 py-3 rounded relative"
-						role="alert"
-					>
-						<strong className="font-bold">Error: </strong>
-						<span className="block sm:inline">{error}</span>
-						<button
-							className="absolute top-0 bottom-0 right-0 px-4 py-3"
-							onClick={() => setError(null)}
-						>
-							<span className="sr-only">Dismiss</span>
-							<svg
-								className="fill-current h-6 w-6 text-red-500"
-								role="button"
-								xmlns="http://www.w3.org/2000/svg"
-								viewBox="0 0 20 20"
-							>
-								<title>Close</title>
-								<path d="M14.348 14.849a1.2 1.2 0 0 1-1.697 0L10 11.819l-2.651 3.029a1.2 1.2 0 1 1-1.697-1.697l2.758-3.15-2.759-3.152a1.2 1.2 0 1 1 1.697-1.697L10 8.183l2.651-3.031a1.2 1.2 0 1 1 1.697 1.697l-2.758 3.152 2.758 3.15a1.2 1.2 0 0 1 0 1.698z" />
-							</svg>
-						</button>
-					</div>
-				)}
-
-				{/* Add view toggle when in analysis mode */}
-				{mode === "analysis" && (
-					<div className="flex justify-center">
-						<div className="inline-flex rounded-md shadow-sm" role="group">
-							<button
-								type="button"
-								className={`px-4 py-2 text-sm font-medium ${
-									viewMode === "text"
-										? "bg-zinc-700 text-white"
-										: "bg-white text-zinc-700 hover:bg-zinc-100"
-								} rounded-l-lg border border-zinc-200`}
-								onClick={() => {
-									setViewMode("text");
-								}}
-							>
-								Full Text
-							</button>
-							<button
-								type="button"
-								className={`px-4 py-2 text-sm font-medium ${
-									viewMode === "graph"
-										? "bg-zinc-700 text-white"
-										: "bg-white text-zinc-700 hover:bg-zinc-100"
-								} border-t border-b border-zinc-200`}
-								onClick={() => {
-									setViewMode("graph");
-								}}
-							>
-								Canvas
-							</button>
-							<button
-								type="button"
-								className={`px-4 py-2 text-sm font-medium ${
-									viewMode === "claims"
-										? "bg-zinc-700 text-white"
-										: "bg-white text-zinc-700 hover:bg-zinc-100"
-								} rounded-r-lg border border-zinc-200`}
-								onClick={() => {
-									setViewMode("claims");
-								}}
-							>
-								Claims
-							</button>
-						</div>
-					</div>
-				)}
+		<div className="max-w-4xl mx-auto p-8">
+			<div className="mb-8">
+				<h1 className="text-2xl font-bold text-zinc-900">
+					{mode === "input" ? "Write Your Ideas" : "Analyze Your Text"}
+				</h1>
+				<p className="text-zinc-600 mt-2">
+					{mode === "input"
+						? "Write down your initial thoughts and ideas about the topic."
+						: "Review and analyze your text. Use the highlight buttons to mark different types of content."}
+				</p>
 			</div>
 
 			<div className="remirror-theme">
-				<div className={viewMode === "graph" ? "w-full" : "max-w-4xl mx-auto"}>
-					{/* Conditionally render Editor, ArgumentGraph, or ClaimsView based on viewMode */}
-					{viewMode === "text" || mode === "input" ? (
-						<Editor
-							key={`editor-${viewMode}-${content?.highlights?.length || 0}`}
-							ref={editorRef}
-							initialContent={content.content}
-							showHighlightButtons={mode === "analysis"}
-							renderSidebar={mode === "analysis"}
-							highlights={content.highlights || []}
-							relationships={content.relationships || []}
-							onChangeJSON={handleEditorChange}
-						/>
-					) : viewMode === "graph" ? (
-						<ArgumentGraph
-							highlights={content.highlights || []}
-							relationships={content.relationships || []}
-							onHighlightsChange={handleGraphHighlightsChange}
-							onRelationshipsChange={handleGraphRelationshipsChange}
-						/>
-					) : (
-						<ClaimsView
-							highlights={content.highlights || []}
-							relationships={content.relationships || []}
-							onHighlightsChange={handleClaimsHighlightsChange}
-							onRelationshipsChange={handleGraphRelationshipsChange}
-							sessionId={parseInt(id || "0")}
-						/>
-					)}
-
-					{/* Debug Logs Section */}
-					<div className="mt-8 border border-gray-200 rounded-md">
-						<details className="group">
-							<summary className="flex justify-between items-center font-medium cursor-pointer p-4  rounded-md">
-								<span className="text-gray-700 font-mono text-sm">
-									Debug Logs
-								</span>
-								<span className="transition group-open:rotate-180">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										fill="none"
-										viewBox="0 0 24 24"
-										strokeWidth={1.5}
-										stroke="currentColor"
-										className="w-5 h-5"
-									>
-										<path
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											d="M19.5 8.25l-7.5 7.5-7.5-7.5"
-										/>
-									</svg>
-								</span>
-							</summary>
-							<pre className="p-4 rounded-md max-w-full overflow-auto mb-4 text-sm">
-								Highlights:
-								<br />
-								{JSON.stringify(content.highlights || [], null, 2)}
-								<br />
-								<br />
-								Relationships:
-								<br />
-								{JSON.stringify(content.relationships || [], null, 2)}
-							</pre>
-						</details>
-					</div>
-				</div>
+				<Editor
+					key={`editor-${content?.highlights?.length || 0}`}
+					ref={editorRef}
+					initialContent={content.content}
+					showHighlightButtons={mode === "analysis"}
+					renderSidebar={mode === "analysis"}
+					highlights={content.highlights || []}
+					relationships={content.relationships || []}
+					onChangeJSON={handleEditorChange}
+				/>
 			</div>
+
+			{error && (
+				<div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg">
+					{error}
+				</div>
+			)}
 		</div>
 	);
 };

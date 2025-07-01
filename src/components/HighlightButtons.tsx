@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { useCommands, useHelpers, useRemirrorContext } from "@remirror/react";
 import type { RemirrorJSON } from "remirror";
 import { EntityReferenceExtension } from "remirror/extensions";
@@ -28,6 +28,33 @@ export const HighlightButtons = ({ onSave }: HighlightButtonsProps) => {
 	const { getState, view } = useRemirrorContext();
 	const [error, setError] = useState<string | null>(null);
 	const [pendingRemoval, setPendingRemoval] = useState(false);
+	const [isEditorReady, setIsEditorReady] = useState(false);
+
+	// Check if editor is initialized
+	useEffect(() => {
+		try {
+			// Try to access editor state to verify it's ready
+			const state = getState();
+			const schema = view?.state?.schema;
+			if (state && schema && schema.marks["entity-reference"]) {
+				setIsEditorReady(true);
+			}
+		} catch (error) {
+			console.warn('Editor not fully initialized:', error);
+			setIsEditorReady(false);
+		}
+	}, [view, getState]);
+
+	// Safe wrapper for getEntityReferencesAt
+	const safeGetEntityReferencesAt = useCallback(() => {
+		try {
+			if (!isEditorReady) return [];
+			return getEntityReferencesAt();
+		} catch (error) {
+			console.warn('Error getting entity references:', error);
+			return [];
+		}
+	}, [isEditorReady, getEntityReferencesAt]);
 
 	// Handle highlight toggle (add or remove)
 	const handleHighlight = useCallback(
@@ -46,7 +73,7 @@ export const HighlightButtons = ({ onSave }: HighlightButtonsProps) => {
 				const hasSelection = from !== to;
 
 				// Get entity references at the current cursor position/selection
-				const highlightsAt = getEntityReferencesAt();
+				const highlightsAt = safeGetEntityReferencesAt();
 
 				// Find highlights of the specified type
 				const highlightsOfType = highlightsAt.filter((h) => {
@@ -189,15 +216,15 @@ export const HighlightButtons = ({ onSave }: HighlightButtonsProps) => {
 				setPendingRemoval(false);
 			}
 		},
-		[getState, getEntityReferencesAt, commands, onSave, pendingRemoval, view]
+		[getState, safeGetEntityReferencesAt, commands, onSave, pendingRemoval, view]
 	);
 
 	return (
 		<div className="flex flex-col gap-2 highlight-buttons-sidebar">
-			{error && <div className="text-red-500 mb-2 text-sm">{error}</div>}
+			{error && <div className="text-red-600 mb-2 text-sm font-medium">{error}</div>}
 			{LABEL_CONFIGS.map((label) => {
 				// Get entity references at the current cursor position
-				const highlightsAt = getEntityReferencesAt();
+				const highlightsAt = safeGetEntityReferencesAt();
 
 				// Check if any of these references match our label type
 				const active = highlightsAt.some((h) => {
@@ -210,8 +237,8 @@ export const HighlightButtons = ({ onSave }: HighlightButtonsProps) => {
 						onClick={() => handleHighlight(label.id)}
 						className={`
 							inline-flex items-center gap-2.5 text-left transition-all group leading-tight w-fit py-1.5 px-2.5 rounded-full
-							${active ? " bg-white bg-opacity-70" : "p-1"}
-							hover:bg-white hover:bg-opacity-50
+							${active ? "bg-white shadow-sm" : "p-1"}
+							hover:bg-white hover:shadow-sm
 							${pendingRemoval ? "opacity-50 cursor-wait" : ""}
 						`}
 						disabled={pendingRemoval}
@@ -229,15 +256,15 @@ export const HighlightButtons = ({ onSave }: HighlightButtonsProps) => {
 						/>
 						<span
 							className={`font-medium 
-								${active ? "text-black" : "text-zinc-600"} 
-								group-hover:text-black transition-colors
+								${active ? "text-slate-900" : "text-slate-600"} 
+								group-hover:text-slate-900 transition-colors
 							`}
 						>
 							{label.name}
 						</span>
 						{active && !pendingRemoval && (
 							<svg
-								className="w-3.5 h-3.5 inline-block  stroke-zinc-400"
+								className="w-3.5 h-3.5 inline-block stroke-slate-400"
 								viewBox="0 0 24 24"
 								fill="none"
 								strokeWidth="2"
@@ -250,7 +277,7 @@ export const HighlightButtons = ({ onSave }: HighlightButtonsProps) => {
 							</svg>
 						)}
 						{active && pendingRemoval && (
-							<span className="ml-1 text-xs text-gray-500">(removing...)</span>
+							<span className="ml-1 text-xs text-slate-500">(removing...)</span>
 						)}
 					</button>
 				);

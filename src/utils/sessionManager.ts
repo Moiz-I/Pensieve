@@ -92,8 +92,13 @@ export class SessionManager {
 		const session = await this.getSession(sessionId);
 		if (!session) throw new Error("Session not found");
 
+		// Ensure we have valid input content before starting analysis
+		if (!session.inputContent?.content) {
+			throw new Error("No input content to analyze");
+		}
+
+		// Update session status atomically
 		await db.sessions.update(sessionId, {
-			...session,
 			status: "analysis",
 			lastModified: new Date(),
 		});
@@ -166,104 +171,44 @@ export class SessionManager {
 		promptId: string,
 		content: RemirrorJSON,
 		highlights: HighlightWithText[],
-		relationships: Relationship[]
+		relationships: Relationship[] = [] // Provide default empty array for relationships
 	): Promise<void> {
+		console.log("📝 Starting saveAnalysis...", { sessionId, modelName, highlightCount: highlights.length });
+		
 		const session = await this.getSession(sessionId);
 		if (!session) throw new Error("Session not found");
 
+		// Ensure highlights is an array
+		const validHighlights = Array.isArray(highlights) ? highlights : [];
+		// Ensure relationships is an array 
+		const validRelationships = Array.isArray(relationships) ? relationships : [];
+
 		// Calculate highlight count
-		const highlightCount = highlights?.length || 0;
+		const highlightCount = validHighlights.length;
 
 		// Get the full text content
-		const fullText =
-			content.content
-				?.map((paragraph) =>
-					paragraph.content?.map((node) => node.text).join("")
-				)
-				.join("\n") || "";
+		const fullText = content.content
+			?.map((paragraph) => paragraph.content?.map((node) => node.text).join(""))
+			.join("\n") || "";
 
 		// Sort highlights by their position in the text
-		const sortedHighlights = [...highlights].sort((a, b) => {
+		const sortedHighlights = [...validHighlights].sort((a, b) => {
 			const aIndex = fullText.indexOf(a.text);
 			const bIndex = fullText.indexOf(b.text);
 			return aIndex - bIndex;
 		});
 
-		// Create a new content structure with highlights as marks
-		const contentWithHighlights: RemirrorJSON = {
-			type: "doc",
-			content:
-				content.content?.map((paragraph) => {
-					if (paragraph.type === "paragraph" && paragraph.content) {
-						let currentPosition = 0;
-						const newContent: Array<{
-							type: "text";
-							text: string;
-							marks?: Array<{
-								type: string;
-								attrs: {
-									id: string;
-									labelType: string;
-									type: string;
-								};
-							}>;
-						}> = [];
-						const paragraphText = paragraph.content
-							.map((node) => node.text)
-							.filter(Boolean)
-							.join("");
+		console.log("📊 Processing highlights:", { 
+			totalHighlights: sortedHighlights.length,
+			textLength: fullText.length,
+			relationshipsCount: validRelationships.length
+		});
 
-						// Process text and add highlights for this paragraph
-						for (const highlight of sortedHighlights) {
-							const highlightStart = paragraphText.indexOf(
-								highlight.text,
-								currentPosition
-							);
-							if (highlightStart === -1) continue;
-
-							// Add text before highlight if any
-							if (highlightStart > currentPosition) {
-								newContent.push({
-									type: "text",
-									text: paragraphText.slice(currentPosition, highlightStart),
-								});
-							}
-
-							// Add highlighted text
-							newContent.push({
-								type: "text",
-								text: highlight.text,
-								marks: [
-									{
-										type: "entity-reference",
-										attrs: {
-											id: highlight.id,
-											labelType: highlight.labelType,
-											type: highlight.labelType,
-										},
-									},
-								],
-							});
-
-							currentPosition = highlightStart + highlight.text.length;
-						}
-
-						// Add remaining text if any
-						if (currentPosition < paragraphText.length) {
-							newContent.push({
-								type: "text",
-								text: paragraphText.slice(currentPosition),
-							});
-						}
-
-						return {
-							...paragraph,
-							content: newContent,
-						};
-					}
-					return paragraph;
-				}) || [],
-		};
+		// Create a new document with the highlights applied as marks
+		const contentWithHighlights = createDocumentWithMarks(
+			content,
+			sortedHighlights
+		);
 
 		const update: Session = {
 			...session,
@@ -273,15 +218,22 @@ export class SessionManager {
 				modelName,
 				promptId,
 				content: contentWithHighlights,
-				highlights,
-				relationships,
+				highlights: sortedHighlights,
+				relationships: validRelationships,
 				highlightCount,
 				updatedAt: new Date(),
 			},
 			lastModified: new Date(),
 		};
 
-		await db.sessions.update(sessionId, update);
+		console.log("💾 Updating session in database...");
+		try {
+			await db.sessions.update(sessionId, update);
+			console.log("✅ Session updated successfully");
+		} catch (dbError) {
+			console.error("❌ Failed to update session in database:", dbError);
+			throw new Error(`Database error while saving analysis: ${dbError instanceof Error ? dbError.message : String(dbError)}`);
+		}
 	}
 
 	/**
@@ -424,40 +376,19 @@ export class SessionManager {
 		highlights?: HighlightType;
 		relationships?: Relationship[];
 	}> {
-		console.log(
-			`📋 [SessionManager] Getting effective content for session ${sessionId}`
-		);
-
 		const session = await this.getSession(sessionId);
-		if (!session) {
-			console.error(`❌ [SessionManager] Session not found: ${sessionId}`);
-			throw new Error("Session not found");
-		}
+		if (!session) throw new Error("Session not found");
 
-		if (session.analysedContent) {
-			// Use the stored highlights if they exist
-			if (
-				session.analysedContent.highlights &&
-				session.analysedContent.highlights.length > 0
-			) {
-				return {
-					content: session.analysedContent.content,
-					highlights: session.analysedContent.highlights,
-					relationships: session.analysedContent.relationships,
-				};
-			}
-			const highlights = await this.extractHighlightsFromContentMarks(
-				session.analysedContent.content,
-				session.analysedContent.highlights || [] // Pass existing highlights if available
-			);
-
+		// If we're in analysis mode and have analysed content, use that
+		if (session.status === "analysis" && session.analysedContent) {
 			return {
 				content: session.analysedContent.content,
-				highlights: highlights,
+				highlights: session.analysedContent.highlights,
 				relationships: session.analysedContent.relationships,
 			};
 		}
 
+		// Otherwise, use input content
 		return {
 			content: session.inputContent.content,
 		};

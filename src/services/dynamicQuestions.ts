@@ -20,7 +20,6 @@ interface GenerateQuestionsOptions {
 	text: string;
 	sessionId: number;
 	topic: string;
-	apiKey: string;
 	previousQuestions?: string[]; // Previously shown questions to avoid repeating
 }
 
@@ -150,7 +149,6 @@ export class DynamicQuestionsService {
 				options.text,
 				prompt,
 				{
-					apiKey: options.apiKey,
 					model: "gpt-4o-mini",
 				}
 			);

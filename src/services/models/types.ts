@@ -1,7 +1,7 @@
 import type { Relationship } from "../../utils/relationshipTypes";
 import { XYPosition } from "reactflow";
 
-export type ModelName = "gpt4o-mini" | "gpt-4o" | "claude-3.5";
+export type ModelName = "gpt4o-mini" | "claude-3.5";
 
 export type HighlightWithText = {
 	id: string;

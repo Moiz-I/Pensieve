@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
 @import "remirror/styles/all.css";
 
 @tailwind base;
@@ -6,10 +6,11 @@
 @tailwind utilities;
 
 :root {
-	font-family: "Inter", system-ui, Helvetica, Arial, sans-serif;
-	line-height: 1.5;
+	font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+	line-height: 1.6;
 	font-weight: 400;
-	background-color: #ebebed;
+	background-color: #F9F9F9;
+	color: #333333;
 
 	font-synthesis: none;
 	text-rendering: optimizeLegibility;
@@ -24,11 +25,11 @@
 
 /* Remirror custom styles */
 .remirror-theme {
-	--rmr-color-background: white;
+	--rmr-color-background: #ffffff;
 	--rmr-color-border: #e2e8f0;
-	--rmr-color-selection: #b4d5ff;
-	--rmr-color-text-primary: #334155;
-	--rmr-color-text-secondary: #64748b;
+	--rmr-color-selection: #5CB85C;
+	--rmr-color-text-primary: #333333;
+	--rmr-color-text-secondary: #666666;
 	--rmr-spacing-1: 0.25rem;
 	--rmr-spacing-2: 0.5rem;
 	--rmr-spacing-3: 0.75rem;
@@ -41,14 +42,14 @@
 	/* Editor specific styles */
 	min-height: 100%;
 	margin: 0 auto;
-	font-family: "Lora", serif;
+	font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 	font-size: 1.125rem;
 	line-height: 1.6;
 	position: relative;
 }
 
 .remirror-theme:focus {
-	outline: rgb(161 161 170); /* zinc-400 */
+	outline: #5CB85C;
 }
 
 .remirror-editor-wrapper {
@@ -68,18 +69,19 @@
 .remirror-theme .ProseMirror {
 	padding: var(--rmr-spacing-3) var(--rmr-spacing-6);
 	outline: none;
-	max-width: 900px;
+	max-width: 800px;
 	min-height: 100%;
 	height: 100%;
 	border-radius: 0.5rem;
 	border: 1px solid var(--rmr-color-border);
 	background-color: var(--rmr-color-background);
-	box-shadow: 0 12px 16px -2px rgba(24, 16, 62, 0.05);
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+	overflow-y: hidden;
 }
 
 .remirror-theme .ProseMirror:active,
 .remirror-theme .ProseMirror:focus {
-	box-shadow: none;
+	box-shadow: 0 0 0 2px rgba(92, 184, 92, 0.2);
 }
 
 .remirror-theme .ProseMirror p {
@@ -94,13 +96,9 @@
 	height: 0;
 }
 
-.font-serif {
-	font-family: "Lora", serif;
-}
-
 /* Style for highlight buttons sidebar */
 .highlight-buttons-sidebar {
-	font-family: "Inter", system-ui, sans-serif;
+	font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 	font-size: 0.9rem;
 }
 

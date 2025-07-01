@@ -250,13 +250,6 @@ export function useDynamicQuestions({
 			try {
 				setIsLoadingQuestions(true);
 
-				// Get API key from environment
-				const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
-				if (!apiKey) {
-					console.error("OpenAI API key not found");
-					throw new Error("OpenAI API key not found in environment variables");
-				}
-
 				// Get previously asked questions to avoid repeating
 				const allQuestions = await DynamicQuestionsService.getAllQuestions(
 					sessionId
@@ -272,7 +265,6 @@ export function useDynamicQuestions({
 					text: textContent,
 					sessionId: sessionId,
 					topic: topic,
-					apiKey,
 					previousQuestions,
 				});
 				console.log("Generated new questions:", newQuestions.length);
